@@ -1,21 +1,17 @@
 {
   "name": "codegen-ai",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "AI code generation, analysis, and debugging platform",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
     "dev": "node --watch server.js"
   },
-  "keywords": [
-    "ai",
-    "codegen",
-    "generator",
-    "debugging",
-    "analysis"
-  ],
+  "keywords": ["ai", "codegen", "generator", "debugging", "analysis"],
   "license": "MIT",
   "dependencies": {
+    "better-sqlite3": "^11.3.0",
+    "dotenv": "^16.4.5",
     "openai": "^4.56.0"
   }
 }

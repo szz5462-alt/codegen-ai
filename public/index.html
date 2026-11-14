@@ -1,117 +1,83 @@
 <!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>codegen-ai</title>
-    <link rel="stylesheet" href="/styles.css" />
-  </head>
-  <body>
-    <header class="topbar">
-      <div class="brand">codegen-ai</div>
-      <nav>
-        <a href="#features">Features</a>
-        <a href="#workspace">Workspace</a>
-        <a href="#chat">AI Chat</a>
-        <a href="#status">Status</a>
-      </nav>
-    </header>
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#07111f" />
+  <title>codegen-ai — AI Engineering Workspace</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/">codegen-ai<span class="brand-dot">.</span></a>
+    <nav id="mainNav" hidden>
+      <a href="#dashboard">Dashboard</a>
+      <a href="#assistant">AI workspace</a>
+      <span id="userEmail" class="user-email"></span>
+      <button id="logoutButton" class="button button-quiet">Sign out</button>
+    </nav>
+  </header>
 
-    <main>
-      <section class="hero">
-        <div class="hero-copy">
-          <p class="eyebrow">AI Engineering Workspace</p>
-          <h1>Build faster with AI-guided code generation and debugging.</h1>
-          <p class="subtitle">
-            codegen-ai helps teams generate product ideas, build code scaffolds,
-            trace bugs, and turn engineering tasks into focused implementation plans.
-          </p>
-          <div class="actions">
-            <button id="loadSummary">Load Summary</button>
-            <button id="loadFeatures" class="secondary">View Features</button>
-          </div>
+  <main>
+    <section id="authView" class="auth-layout">
+      <div class="hero-copy">
+        <p class="eyebrow">Your engineering workspace</p>
+        <h1>Turn ideas into working software.</h1>
+        <p class="subtitle">Create projects, get AI-assisted implementation guidance, and keep your work organized in one private workspace.</p>
+        <div class="hero-points"><span>Private projects</span><span>AI code assistant</span><span>Save as you go</span></div>
+      </div>
+      <div class="auth-card">
+        <div class="auth-tabs" role="tablist">
+          <button id="loginTab" class="auth-tab active" type="button">Sign in</button>
+          <button id="registerTab" class="auth-tab" type="button">Create account</button>
         </div>
-
-        <div class="hero-panel">
-          <div class="panel-card">
-            <span class="label">System Status</span>
-            <strong id="statusText">Ready</strong>
-            <ul>
-              <li>Prompt-based planning</li>
-              <li>Debug workflows</li>
-              <li>OpenAI-ready</li>
-            </ul>
-          </div>
-        </div>
-      </section>
-
-      <section id="features" class="section">
-        <h2>Core features</h2>
-        <div id="featureList" class="features-grid"></div>
-      </section>
-
-      <section id="workspace" class="section workspace-section">
-        <div class="workspace-header">
-          <h2>Generate a code plan</h2>
-        </div>
-
-        <form id="planForm" class="plan-form">
-          <label for="promptInput">Describe your task</label>
-          <textarea id="promptInput" rows="6" placeholder="Example: Build a React component for a pricing table or debug the login error in the auth module"></textarea>
-
-          <div class="form-row">
-            <label for="modeSelect">Mode</label>
-            <select id="modeSelect">
-              <option value="general">General</option>
-              <option value="debug">Debug</option>
-              <option value="component">Component</option>
-              <option value="api">API</option>
-            </select>
-          </div>
-
-          <button type="submit" class="primary-button">Generate plan</button>
+        <form id="authForm">
+          <label for="emailInput">Email</label>
+          <input id="emailInput" type="email" autocomplete="email" required maxlength="254" placeholder="you@example.com" />
+          <label for="passwordInput">Password</label>
+          <input id="passwordInput" type="password" autocomplete="current-password" required minlength="10" maxlength="128" placeholder="At least 10 characters" />
+          <button id="authSubmit" class="button button-primary full-width" type="submit">Sign in</button>
+          <p id="authMessage" class="message" aria-live="polite"></p>
+          <p class="fine-print">Your password is stored as a secure hash and is never displayed.</p>
         </form>
+      </div>
+    </section>
 
-        <div id="resultPanel" class="result-panel">
-          <h3>Generated output</h3>
-          <p class="empty-state">Your AI-assisted plan will appear here.</p>
-        </div>
-      </section>
-
-      <section id="chat" class="section chat-section">
-        <div class="workspace-header">
-          <h2>Ask the AI assistant</h2>
-        </div>
-
-        <form id="chatForm" class="plan-form">
-          <label for="chatPrompt">Your prompt</label>
-          <textarea id="chatPrompt" rows="5" placeholder="Ask for an architecture review, bug fix strategy, or implementation guidance..."></textarea>
-
-          <div class="form-row">
-            <label for="chatMode">Mode</label>
-            <select id="chatMode">
-              <option value="general">General</option>
-              <option value="debug">Debug</option>
-              <option value="component">Component</option>
-              <option value="api">API</option>
-            </select>
-          </div>
-
-          <button type="submit" class="primary-button">Send to AI</button>
+    <section id="dashboard" class="dashboard" hidden>
+      <div class="section-heading">
+        <div><p class="eyebrow">Dashboard</p><h1>Your projects</h1><p class="muted">A private place for your ideas and engineering work.</p></div>
+        <button id="newProjectButton" class="button button-primary">＋ New project</button>
+      </div>
+      <div id="projectFormWrap" class="project-form-wrap" hidden>
+        <form id="projectForm" class="project-form">
+          <div class="form-title"><h2 id="projectFormTitle">Create a project</h2><button id="cancelProjectButton" class="button button-quiet" type="button">Cancel</button></div>
+          <input id="projectId" type="hidden" />
+          <label for="projectName">Project name</label>
+          <input id="projectName" maxlength="120" required placeholder="e.g. Customer portal" />
+          <label for="projectDescription">Description <span class="muted">(optional)</span></label>
+          <textarea id="projectDescription" rows="3" maxlength="4000" placeholder="What are you building?"></textarea>
+          <button class="button button-primary" type="submit">Save project</button>
+          <p id="projectMessage" class="message" aria-live="polite"></p>
         </form>
+      </div>
+      <div id="projectList" class="project-grid"></div>
+      <p id="projectEmpty" class="empty-state" hidden>No projects yet. Create one to get started.</p>
+    </section>
 
-        <div id="chatResult" class="result-panel">
-          <h3>AI response</h3>
-          <p class="empty-state">The AI output will be displayed here.</p>
-        </div>
-      </section>
-
-      <section id="status" class="section status-box">
-        <h2>Live platform status</h2>
-        <pre id="apiStatus">Loading platform status...</pre>
-      </section>
-    </main>
-
-    <script src="/app.js"></script>
-  </body>
+    <section id="assistant" class="assistant-section" hidden>
+      <div class="section-heading">
+        <div><p class="eyebrow">AI workspace</p><h2 id="assistantTitle">Ask the assistant</h2><p id="assistantDescription" class="muted">Describe a task, share an error, or ask for an implementation plan.</p></div>
+        <button id="backToProjects" class="button button-quiet">← All projects</button>
+      </div>
+      <form id="chatForm" class="chat-form">
+        <label for="chatPrompt">What would you like help with?</label>
+        <textarea id="chatPrompt" rows="7" maxlength="30000" required placeholder="Describe your feature, code question, or debugging issue..."></textarea>
+        <div class="chat-controls"><label for="chatMode">Mode<select id="chatMode"><option value="general">General</option><option value="debug">Debug</option><option value="component">Component</option><option value="api">API</option></select></label><button id="sendButton" class="button button-primary" type="submit">Generate response</button></div>
+      </form>
+      <div id="chatResult" class="response-card" aria-live="polite"><p class="muted">Your response will appear here.</p></div>
+    </section>
+    <footer><span>codegen-ai</span><span id="providerStatus">Checking AI status…</span></footer>
+  </main>
+  <script src="/app.js"></script>
+</body>
 </html>

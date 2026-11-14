@@ -1,376 +1,285 @@
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
+const { promisify } = require('util');
+require('dotenv').config();
+const Database = require('better-sqlite3');
 const { OpenAI } = require('openai');
 
-const PORT = process.env.PORT || 3000;
+const PORT = Number(process.env.PORT) || 3000;
 const PUBLIC_DIR = path.join(__dirname, 'public');
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY || '';
-const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-4o-mini';
-const openaiClient = OPENAI_API_KEY ? new OpenAI({ apiKey: OPENAI_API_KEY }) : null;
+const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
+const SESSION_TTL_SECONDS = 30 * 24 * 60 * 60;
+const COOKIE_NAME = 'codegen_session';
+const secureCookie = process.env.SESSION_COOKIE_SECURE === 'true' || process.env.NODE_ENV === 'production';
+const scrypt = promisify(crypto.scrypt);
+const openaiClient = process.env.OPENAI_API_KEY
+  ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
+  : null;
+const model = process.env.OPENAI_MODEL || 'gpt-4o-mini';
+
+fs.mkdirSync(DATA_DIR, { recursive: true });
+const db = new Database(path.join(DATA_DIR, 'codegen-ai.sqlite'));
+db.pragma('journal_mode = WAL');
+db.pragma('foreign_keys = ON');
+db.exec(`
+  CREATE TABLE IF NOT EXISTS users (
+    id TEXT PRIMARY KEY,
+    email TEXT NOT NULL UNIQUE,
+    password_hash TEXT NOT NULL,
+    created_at INTEGER NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS sessions (
+    token_hash TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    expires_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS sessions_user_id_idx ON sessions(user_id);
+  CREATE TABLE IF NOT EXISTS projects (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS projects_user_id_idx ON projects(user_id);
+`);
 
 const MIME_TYPES = {
-  '.html': 'text/html; charset=utf-8',
-  '.css': 'text/css; charset=utf-8',
-  '.js': 'application/javascript; charset=utf-8',
-  '.json': 'application/json; charset=utf-8',
-  '.svg': 'image/svg+xml',
-  '.png': 'image/png',
-  '.jpg': 'image/jpeg',
-  '.jpeg': 'image/jpeg',
-  '.ico': 'image/x-icon',
-  '.txt': 'text/plain; charset=utf-8'
+  '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8',
+  '.js': 'application/javascript; charset=utf-8', '.json': 'application/json; charset=utf-8',
+  '.svg': 'image/svg+xml', '.png': 'image/png', '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg', '.ico': 'image/x-icon', '.txt': 'text/plain; charset=utf-8'
 };
-
 const features = [
-  {
-    title: 'Code Generation',
-    description: 'Turn natural language prompts into clean code structures, components, and modules.'
-  },
-  {
-    title: 'Bug Analysis',
-    description: 'Investigate stack traces and runtime issues to find root causes faster.'
-  },
-  {
-    title: 'Refactoring',
-    description: 'Improve readability, maintainability, and performance across large codebases.'
-  },
-  {
-    title: 'Project Insights',
-    description: 'Summarize architecture, dependencies, and code quality trends across repositories.'
-  }
+  { title: 'Code Generation', description: 'Turn natural-language prompts into code structures, components, and modules.' },
+  { title: 'Bug Analysis', description: 'Investigate stack traces and runtime issues to find root causes faster.' },
+  { title: 'Refactoring', description: 'Improve readability, maintainability, and performance across your codebase.' },
+  { title: 'Project Workspace', description: 'Keep project descriptions and AI work organized in your private dashboard.' }
 ];
 
+function sendJson(res, status, data, extraHeaders = {}) {
+  res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', ...extraHeaders });
+  res.end(JSON.stringify(data));
+}
 function readBody(req) {
   return new Promise((resolve, reject) => {
     let body = '';
-
     req.on('data', chunk => {
       body += chunk;
-      if (body.length > 1e6) {
-        req.socket.destroy();
-        reject(new Error('Payload too large'));
+      if (Buffer.byteLength(body) > 1024 * 1024) {
+        reject(Object.assign(new Error('Request body is too large.'), { status: 413 }));
+        req.destroy();
       }
     });
-
     req.on('end', () => {
-      if (!body) {
-        resolve({});
-        return;
-      }
-
+      if (!body) return resolve({});
       try {
-        resolve(JSON.parse(body));
-      } catch (error) {
-        reject(new Error('Invalid JSON payload'));
+        const parsed = JSON.parse(body);
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error();
+        resolve(parsed);
+      } catch {
+        reject(Object.assign(new Error('Request body must be valid JSON.'), { status: 400 }));
       }
     });
-
     req.on('error', reject);
   });
 }
-
-function getModePrompt(mode) {
-  switch (mode) {
-    case 'debug':
-      return 'You are an expert debugging assistant. Provide a concise root-cause investigation plan, suspected failure points, and a safe fix strategy.';
-    case 'component':
-      return 'You are a senior front-end engineer. Design a clean UI component, list props, state behavior, and accessibility notes.';
-    case 'api':
-      return 'You are a backend engineer. Explain the API contract, validation, error handling, and sample implementation.';
-    default:
-      return 'You are a senior software engineer. Offer a practical implementation plan and high-quality code structure.';
-  }
+function parseCookies(header = '') {
+  return Object.fromEntries(header.split(';').map(part => part.trim()).filter(Boolean).map(part => {
+    const index = part.indexOf('=');
+    return index < 0 ? [part, ''] : [part.slice(0, index), decodeURIComponent(part.slice(index + 1))];
+  }));
 }
-
-async function callOpenAI(prompt, mode) {
+function hashToken(token) {
+  return crypto.createHash('sha256').update(token).digest('hex');
+}
+function sessionCookie(token, maxAge = SESSION_TTL_SECONDS) {
+  return `${COOKIE_NAME}=${encodeURIComponent(token)}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${maxAge}${secureCookie ? '; Secure' : ''}`;
+}
+async function hashPassword(password) {
+  const salt = crypto.randomBytes(16);
+  const derived = await scrypt(password, salt, 64);
+  return `${salt.toString('hex')}:${derived.toString('hex')}`;
+}
+async function verifyPassword(password, stored) {
+  const [saltHex, hashHex] = stored.split(':');
+  if (!saltHex || !hashHex) return false;
+  const expected = Buffer.from(hashHex, 'hex');
+  const actual = await scrypt(password, Buffer.from(saltHex, 'hex'), expected.length);
+  return actual.length === expected.length && crypto.timingSafeEqual(actual, expected);
+}
+function currentUser(req) {
+  const token = parseCookies(req.headers.cookie)[COOKIE_NAME];
+  if (!token) return null;
+  const session = db.prepare(`SELECT users.id, users.email FROM sessions JOIN users ON users.id = sessions.user_id WHERE sessions.token_hash = ? AND sessions.expires_at > ?`).get(hashToken(token), Date.now());
+  return session || null;
+}
+function requireUser(req, res) {
+  const user = currentUser(req);
+  if (!user) sendJson(res, 401, { error: 'Please sign in to continue.' });
+  return user;
+}
+function validateMode(mode) {
+  return ['general', 'debug', 'component', 'api'].includes(mode) ? mode : 'general';
+}
+function modeInstruction(mode) {
+  return ({
+    debug: 'Act as an expert debugging assistant. Explain likely causes and safe, verifiable diagnostic steps.',
+    component: 'Act as a senior frontend engineer. Give an accessible, maintainable component implementation and explain its props.',
+    api: 'Act as a backend engineer. Cover API contracts, validation, errors, and a practical implementation.',
+    general: 'Act as a senior software engineer. Provide a practical solution, code where useful, and verification steps.'
+  })[mode];
+}
+async function getAIResponse(prompt, mode) {
   if (!openaiClient) {
-    return {
-      mode,
-      response: `Demo mode response for: "${prompt}"
-
-Implementation strategy:
-1. Define the expected behavior and edge cases.
-2. Identify the affected files and dependencies.
-3. Make the smallest validated change.
-4. Run focused tests and verify the result.
-
-Sample code: 
-function handleTask(task) {
-  return {
-    task,
-    plan: ['define', 'implement', 'verify']
-  };
-}`
-    };
+    return `Demo mode (configure OPENAI_API_KEY for live responses)\n\nTask: ${prompt}\n\nSuggested approach:\n1. Define expected behavior and edge cases.\n2. Identify affected files and dependencies.\n3. Implement a focused change.\n4. Add tests and verify the result.`;
   }
-
   const completion = await openaiClient.chat.completions.create({
-    model: OPENAI_MODEL,
-    messages: [
-      { role: 'system', content: getModePrompt(mode) },
-      { role: 'user', content: prompt }
-    ],
+    model,
+    messages: [{ role: 'system', content: modeInstruction(mode) }, { role: 'user', content: prompt }],
     temperature: 0.7
   });
-
-  return {
-    mode,
-    response: completion.choices[0].message.content.trim()
-  };
+  return completion.choices[0]?.message?.content?.trim() || 'The model returned an empty response.';
 }
-
-function generateCodeSnippet(prompt, mode) {
-  const text = prompt.toLowerCase();
-
-  if (mode === 'debug' || text.includes('debug') || text.includes('error') || text.includes('exception')) {
-    return `// debug-analysis.js
-function inspectFailure(error, context) {
-  console.log('Error:', error.message);
-  console.log('Context:', context);
-
-  return {
-    issue: error.message,
-    suspectedArea: context.module || 'shared runtime layer',
-    nextSteps: [
-      'Reproduce the failure locally',
-      'Check recent changes in the failing path',
-      'Add a focused regression test',
-      'Validate the fix with the smallest possible run'
-    ]
-  };
-}`;
-  }
-
-  if (mode === 'component' || text.includes('react') || text.includes('component')) {
-    return `export function FeatureCard({ title, description }) {
-  return (
-    <article className="feature-card">
-      <h3>{title}</h3>
-      <p>{description}</p>
-    </article>
-  );
-}`;
-  }
-
-  if (mode === 'api' || text.includes('api') || text.includes('server') || text.includes('route')) {
-    return `app.get('/api/health', (req, res) => {
-  res.json({
-    status: 'ok',
-    timestamp: new Date().toISOString()
-  });
-});
-
-app.post('/api/generate', (req, res) => {
-  const { prompt } = req.body;
-  res.json({
-    accepted: true,
-    summary: 'Request accepted and queued',
-    prompt
-  });
-});`;
-  }
-
-  return `function buildPlan(task) {
-  return {
-    objective: task,
-    steps: [
-      'Define the expected behavior',
-      'Identify the affected files',
-      'Implement the smallest viable change',
-      'Verify the result with tests or checks'
-    ]
-  };
-}`;
-}
-
-function buildResponse(prompt, mode) {
-  const text = prompt.trim();
-  const lower = text.toLowerCase();
-
-  if (!text) {
-    return {
-      summary: 'No prompt was provided.',
-      suggestions: ['Describe the feature, bug, or refactor you want to generate.'],
-      checklist: ['Clarify the goal', 'List affected files', 'Set acceptance criteria'],
-      snippet: 'No snippet generated.'
-    };
-  }
-
-  if (lower.includes('debug') || lower.includes('error') || lower.includes('exception')) {
-    return {
-      summary: 'Debugging plan generated for a runtime issue.',
-      suggestions: [
-        'Capture the exact stack trace and reproduction steps.',
-        'Check the most recent changes around the failing module.',
-        'Add a smallest-possible failing test before applying the fix.'
-      ],
-      checklist: ['Reproduce', 'Inspect logs', 'Patch', 'Validate'],
-      snippet: generateCodeSnippet(prompt, 'debug')
-    };
-  }
-
-  if (mode === 'component' || lower.includes('react') || lower.includes('ui') || lower.includes('component')) {
-    return {
-      summary: 'Component-oriented implementation plan generated.',
-      suggestions: [
-        'Keep the component focused on one responsibility.',
-        'Use props for configurable behavior and data.',
-        'Style consistently with the rest of the design system.'
-      ],
-      checklist: ['Props', 'State', 'Accessibility', 'Testing'],
-      snippet: generateCodeSnippet(prompt, 'component')
-    };
-  }
-
-  if (mode === 'api' || lower.includes('api') || lower.includes('server') || lower.includes('route')) {
-    return {
-      summary: 'API route plan generated for backend work.',
-      suggestions: [
-        'Define the request and response contract explicitly.',
-        'Validate inputs before processing.',
-        'Return helpful error messages and status codes.'
-      ],
-      checklist: ['Validation', 'Auth', 'Error handling', 'Testing'],
-      snippet: generateCodeSnippet(prompt, 'api')
-    };
-  }
-
-  return {
-    summary: 'Feature generation plan produced for a general software task.',
-    suggestions: [
-      'Start by defining the user-facing goal.',
-      'List the inputs, outputs, and edge cases.',
-      'Split work into small implementation steps with validation checks.'
-    ],
-    checklist: ['Goal', 'Scope', 'Acceptance', 'Verification'],
-    snippet: generateCodeSnippet(prompt, mode)
-  };
-}
-
-function serveFile(filePath, res) {
-  fs.readFile(filePath, (error, content) => {
-    if (error) {
-      if (error.code === 'ENOENT') {
-        res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
-        res.end('Not found');
-        return;
-      }
-
-      res.writeHead(500, { 'Content-Type': 'text/plain; charset=utf-8' });
-      res.end('Server error');
-      return;
-    }
-
-    const ext = path.extname(filePath).toLowerCase();
-    const type = MIME_TYPES[ext] || 'application/octet-stream';
-
-    res.writeHead(200, { 'Content-Type': type });
-    res.end(content);
-  });
+function safeProject(row) {
+  return { id: row.id, name: row.name, description: row.description, createdAt: row.created_at, updatedAt: row.updated_at };
 }
 
 const server = http.createServer(async (req, res) => {
-  const url = new URL(req.url, `http://${req.headers.host}`);
+  try {
+    const url = new URL(req.url, 'http://localhost');
+    const pathname = url.pathname;
 
-  if (url.pathname === '/api/health') {
-    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-    res.end(JSON.stringify({
-      status: 'ok',
-      app: 'codegen-ai',
-      timestamp: new Date().toISOString(),
-      mode: 'starter-platform',
-      openaiConfigured: Boolean(openaiClient)
-    }, null, 2));
-    return;
-  }
-
-  if (url.pathname === '/api/features') {
-    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-    res.end(JSON.stringify({ features }, null, 2));
-    return;
-  }
-
-  if (url.pathname === '/api/summary') {
-    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-    res.end(JSON.stringify({
-      name: 'codegen-ai',
-      tagline: 'AI code generation, analysis, and debugging platform',
-      capabilities: ['Generation', 'Analysis', 'Debugging', 'Refactoring'],
-      status: 'ready',
-      aiProvider: openaiClient ? 'OpenAI' : 'Demo mode'
-    }, null, 2));
-    return;
-  }
-
-  if (url.pathname === '/api/generate' && req.method === 'POST') {
-    try {
-      const body = await readBody(req);
-      const prompt = body.prompt || '';
-      const mode = body.mode || 'general';
-      const output = buildResponse(prompt, mode);
-
-      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-      res.end(JSON.stringify({
-        prompt,
-        mode,
-        result: output
-      }, null, 2));
-    } catch (error) {
-      res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
-      res.end(JSON.stringify({ error: error.message }, null, 2));
+    if (pathname === '/api/health' && req.method === 'GET') {
+      return sendJson(res, 200, { status: 'ok', app: 'codegen-ai', aiProvider: openaiClient ? 'OpenAI' : 'Demo mode' });
     }
-    return;
-  }
+    if (pathname === '/api/features' && req.method === 'GET') return sendJson(res, 200, { features });
+    if (pathname === '/api/summary' && req.method === 'GET') {
+      return sendJson(res, 200, { name: 'codegen-ai', tagline: 'AI code generation, analysis, and debugging platform', status: 'ready', aiProvider: openaiClient ? 'OpenAI' : 'Demo mode' });
+    }
 
-  if (url.pathname === '/api/chat' && req.method === 'POST') {
-    try {
+    if (pathname === '/api/auth/register' && req.method === 'POST') {
+      const body = await readBody(req);
+      const email = String(body.email || '').trim().toLowerCase();
+      const password = String(body.password || '');
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 254) return sendJson(res, 400, { error: 'Enter a valid email address.' });
+      if (password.length < 10 || Buffer.byteLength(password) > 1024) return sendJson(res, 400, { error: 'Password must be at least 10 characters.' });
+      const user = { id: crypto.randomUUID(), email, passwordHash: await hashPassword(password), createdAt: Date.now() };
+      try {
+        db.prepare('INSERT INTO users (id, email, password_hash, created_at) VALUES (?, ?, ?, ?)').run(user.id, user.email, user.passwordHash, user.createdAt);
+      } catch (error) {
+        if (error.code === 'SQLITE_CONSTRAINT_UNIQUE') return sendJson(res, 409, { error: 'An account with this email already exists.' });
+        throw error;
+      }
+      const token = crypto.randomBytes(32).toString('base64url');
+      db.prepare('INSERT INTO sessions (token_hash, user_id, expires_at) VALUES (?, ?, ?)').run(hashToken(token), user.id, Date.now() + SESSION_TTL_SECONDS * 1000);
+      return sendJson(res, 201, { user: { id: user.id, email: user.email } }, { 'Set-Cookie': sessionCookie(token) });
+    }
+
+    if (pathname === '/api/auth/login' && req.method === 'POST') {
+      const body = await readBody(req);
+      const email = String(body.email || '').trim().toLowerCase();
+      const password = String(body.password || '');
+      const user = db.prepare('SELECT id, email, password_hash FROM users WHERE email = ?').get(email);
+      if (!user || !(await verifyPassword(password, user.password_hash))) return sendJson(res, 401, { error: 'Email or password is incorrect.' });
+      const token = crypto.randomBytes(32).toString('base64url');
+      db.prepare('INSERT INTO sessions (token_hash, user_id, expires_at) VALUES (?, ?, ?)').run(hashToken(token), user.id, Date.now() + SESSION_TTL_SECONDS * 1000);
+      return sendJson(res, 200, { user: { id: user.id, email: user.email } }, { 'Set-Cookie': sessionCookie(token) });
+    }
+
+    if (pathname === '/api/auth/logout' && req.method === 'POST') {
+      const token = parseCookies(req.headers.cookie)[COOKIE_NAME];
+      if (token) db.prepare('DELETE FROM sessions WHERE token_hash = ?').run(hashToken(token));
+      return sendJson(res, 200, { ok: true }, { 'Set-Cookie': sessionCookie('', 0) });
+    }
+    if (pathname === '/api/auth/me' && req.method === 'GET') {
+      const user = currentUser(req);
+      return sendJson(res, 200, { user: user ? { id: user.id, email: user.email } : null });
+    }
+
+    if (pathname.startsWith('/api/projects')) {
+      const user = requireUser(req, res);
+      if (!user) return;
+      if (pathname === '/api/projects' && req.method === 'GET') {
+        const rows = db.prepare('SELECT id, name, description, created_at, updated_at FROM projects WHERE user_id = ? ORDER BY updated_at DESC').all(user.id);
+        return sendJson(res, 200, { projects: rows.map(safeProject) });
+      }
+      if (pathname === '/api/projects' && req.method === 'POST') {
+        const body = await readBody(req);
+        const name = String(body.name || '').trim();
+        const description = String(body.description || '').trim();
+        if (!name || name.length > 120) return sendJson(res, 400, { error: 'Project name is required and must be 120 characters or fewer.' });
+        if (description.length > 4000) return sendJson(res, 400, { error: 'Description must be 4,000 characters or fewer.' });
+        const now = Date.now();
+        const row = { id: crypto.randomUUID(), name, description, created_at: now, updated_at: now };
+        db.prepare('INSERT INTO projects (id, user_id, name, description, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)').run(row.id, user.id, name, description, now, now);
+        return sendJson(res, 201, { project: safeProject(row) });
+      }
+      const match = pathname.match(/^\/api\/projects\/([0-9a-f-]{36})$/i);
+      if (match) {
+        const existing = db.prepare('SELECT id, name, description, created_at, updated_at FROM projects WHERE id = ? AND user_id = ?').get(match[1], user.id);
+        if (!existing) return sendJson(res, 404, { error: 'Project not found.' });
+        if (req.method === 'PUT') {
+          const body = await readBody(req);
+          const name = String(body.name ?? existing.name).trim();
+          const description = String(body.description ?? existing.description).trim();
+          if (!name || name.length > 120 || description.length > 4000) return sendJson(res, 400, { error: 'Project name or description is invalid.' });
+          const now = Date.now();
+          db.prepare('UPDATE projects SET name = ?, description = ?, updated_at = ? WHERE id = ? AND user_id = ?').run(name, description, now, match[1], user.id);
+          return sendJson(res, 200, { project: safeProject({ ...existing, name, description, updated_at: now }) });
+        }
+        if (req.method === 'DELETE') {
+          db.prepare('DELETE FROM projects WHERE id = ? AND user_id = ?').run(match[1], user.id);
+          return sendJson(res, 200, { ok: true });
+        }
+      }
+      return sendJson(res, 404, { error: 'Project route not found.' });
+    }
+
+    if (pathname === '/api/chat' && req.method === 'POST') {
+      const user = requireUser(req, res);
+      if (!user) return;
       const body = await readBody(req);
       const prompt = String(body.prompt || '').trim();
-      const mode = String(body.mode || 'general');
-
-      if (!prompt) {
-        res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify({ error: 'Prompt is required.' }, null, 2));
-        return;
-      }
-
-      const result = await callOpenAI(prompt, mode);
-
-      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-      res.end(JSON.stringify({
-        ok: true,
-        result
-      }, null, 2));
-    } catch (error) {
-      res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
-      res.end(JSON.stringify({ error: error.message }, null, 2));
+      const mode = validateMode(String(body.mode || 'general'));
+      if (!prompt) return sendJson(res, 400, { error: 'Prompt is required.' });
+      if (prompt.length > 30000) return sendJson(res, 413, { error: 'Prompt is too long (maximum 30,000 characters).' });
+      const response = await getAIResponse(prompt, mode);
+      return sendJson(res, 200, { result: { mode, response } });
     }
-    return;
-  }
 
-  let filePath = url.pathname === '/' ? path.join(PUBLIC_DIR, 'index.html') : path.join(PUBLIC_DIR, url.pathname);
+    if (pathname === '/api/generate' && req.method === 'POST') {
+      const user = requireUser(req, res);
+      if (!user) return;
+      const body = await readBody(req);
+      const prompt = String(body.prompt || '').trim();
+      if (!prompt) return sendJson(res, 400, { error: 'Prompt is required.' });
+      const mode = validateMode(String(body.mode || 'general'));
+      const response = await getAIResponse(prompt, mode);
+      return sendJson(res, 200, { prompt, mode, result: { summary: 'AI response generated.', suggestions: [], checklist: [], snippet: response } });
+    }
 
-  if (!filePath.startsWith(PUBLIC_DIR)) {
-    res.writeHead(403, { 'Content-Type': 'text/plain; charset=utf-8' });
-    res.end('Forbidden');
-    return;
-  }
-
-  fs.stat(filePath, (error, stats) => {
-    if (error || !stats.isFile()) {
+    if (req.method !== 'GET' && req.method !== 'HEAD') return sendJson(res, 405, { error: 'Method not allowed.' }, { Allow: 'GET, HEAD' });
+    let filePath = path.resolve(PUBLIC_DIR, `.${decodeURIComponent(pathname === '/' ? '/index.html' : pathname)}`);
+    const relative = path.relative(PUBLIC_DIR, filePath);
+    if (relative.startsWith('..') || path.isAbsolute(relative)) return sendJson(res, 403, { error: 'Forbidden.' });
+    try {
+      if (!(await fs.promises.stat(filePath)).isFile()) filePath = path.join(PUBLIC_DIR, 'index.html');
+    } catch {
       filePath = path.join(PUBLIC_DIR, 'index.html');
     }
-
-    serveFile(filePath, res);
-  });
-});
-
-server.listen(PORT, () => {
-  console.log(`codegen-ai server is running at http://localhost:${PORT}`);
-  if (!openaiClient) {
-    console.log('OpenAI API key is not configured. Chat endpoint is running in demo mode.');
+    const content = await fs.promises.readFile(filePath);
+    res.writeHead(200, { 'Content-Type': MIME_TYPES[path.extname(filePath).toLowerCase()] || 'application/octet-stream' });
+    res.end(req.method === 'HEAD' ? undefined : content);
+  } catch (error) {
+    const status = error.status || (error.message.includes('API key') ? 503 : 500);
+    if (!res.headersSent) sendJson(res, status, { error: status >= 500 ? 'Request failed. Please try again.' : error.message });
+    else res.destroy();
+    if (status >= 500) console.error(error);
   }
 });
 
-module.exports = server;
+server.listen(PORT, () => console.log(`codegen-ai is running at http://localhost:${PORT}`));
