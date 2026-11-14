@@ -43,6 +43,7 @@ body {
 nav {
   display: flex;
   gap: 1.5rem;
+  flex-wrap: wrap;
 }
 
 nav a {
@@ -180,7 +181,7 @@ button.secondary {
   line-height: 1.7;
 }
 
-.workspace-section {
+.workspace-section, .chat-section {
   display: grid;
   gap: 1.5rem;
 }
@@ -234,7 +235,8 @@ textarea {
 .summary-box,
 .suggestions,
 .checklist,
-.code-block {
+.code-block,
+.ai-response {
   margin-top: 1rem;
 }
 
@@ -260,6 +262,12 @@ textarea {
   color: var(--primary);
 }
 
+.ai-response {
+  white-space: pre-wrap;
+  line-height: 1.8;
+  color: var(--text);
+}
+
 .status-box {
   padding: 1.5rem;
 }
@@ -278,7 +286,6 @@ pre {
   }
 
   nav {
-    flex-wrap: wrap;
     justify-content: center;
   }
 

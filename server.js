@@ -1,9 +1,13 @@
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
+const { OpenAI } = require('openai');
 
 const PORT = process.env.PORT || 3000;
 const PUBLIC_DIR = path.join(__dirname, 'public');
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY || '';
+const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-4o-mini';
+const openaiClient = OPENAI_API_KEY ? new OpenAI({ apiKey: OPENAI_API_KEY }) : null;
 
 const MIME_TYPES = {
   '.html': 'text/html; charset=utf-8',
@@ -64,6 +68,56 @@ function readBody(req) {
 
     req.on('error', reject);
   });
+}
+
+function getModePrompt(mode) {
+  switch (mode) {
+    case 'debug':
+      return 'You are an expert debugging assistant. Provide a concise root-cause investigation plan, suspected failure points, and a safe fix strategy.';
+    case 'component':
+      return 'You are a senior front-end engineer. Design a clean UI component, list props, state behavior, and accessibility notes.';
+    case 'api':
+      return 'You are a backend engineer. Explain the API contract, validation, error handling, and sample implementation.';
+    default:
+      return 'You are a senior software engineer. Offer a practical implementation plan and high-quality code structure.';
+  }
+}
+
+async function callOpenAI(prompt, mode) {
+  if (!openaiClient) {
+    return {
+      mode,
+      response: `Demo mode response for: "${prompt}"
+
+Implementation strategy:
+1. Define the expected behavior and edge cases.
+2. Identify the affected files and dependencies.
+3. Make the smallest validated change.
+4. Run focused tests and verify the result.
+
+Sample code: 
+function handleTask(task) {
+  return {
+    task,
+    plan: ['define', 'implement', 'verify']
+  };
+}`
+    };
+  }
+
+  const completion = await openaiClient.chat.completions.create({
+    model: OPENAI_MODEL,
+    messages: [
+      { role: 'system', content: getModePrompt(mode) },
+      { role: 'user', content: prompt }
+    ],
+    temperature: 0.7
+  });
+
+  return {
+    mode,
+    response: completion.choices[0].message.content.trim()
+  };
 }
 
 function generateCodeSnippet(prompt, mode) {
@@ -225,7 +279,8 @@ const server = http.createServer(async (req, res) => {
       status: 'ok',
       app: 'codegen-ai',
       timestamp: new Date().toISOString(),
-      mode: 'starter-platform'
+      mode: 'starter-platform',
+      openaiConfigured: Boolean(openaiClient)
     }, null, 2));
     return;
   }
@@ -242,7 +297,8 @@ const server = http.createServer(async (req, res) => {
       name: 'codegen-ai',
       tagline: 'AI code generation, analysis, and debugging platform',
       capabilities: ['Generation', 'Analysis', 'Debugging', 'Refactoring'],
-      status: 'ready'
+      status: 'ready',
+      aiProvider: openaiClient ? 'OpenAI' : 'Demo mode'
     }, null, 2));
     return;
   }
@@ -267,6 +323,32 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  if (url.pathname === '/api/chat' && req.method === 'POST') {
+    try {
+      const body = await readBody(req);
+      const prompt = String(body.prompt || '').trim();
+      const mode = String(body.mode || 'general');
+
+      if (!prompt) {
+        res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ error: 'Prompt is required.' }, null, 2));
+        return;
+      }
+
+      const result = await callOpenAI(prompt, mode);
+
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({
+        ok: true,
+        result
+      }, null, 2));
+    } catch (error) {
+      res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ error: error.message }, null, 2));
+    }
+    return;
+  }
+
   let filePath = url.pathname === '/' ? path.join(PUBLIC_DIR, 'index.html') : path.join(PUBLIC_DIR, url.pathname);
 
   if (!filePath.startsWith(PUBLIC_DIR)) {
@@ -286,6 +368,9 @@ const server = http.createServer(async (req, res) => {
 
 server.listen(PORT, () => {
   console.log(`codegen-ai server is running at http://localhost:${PORT}`);
+  if (!openaiClient) {
+    console.log('OpenAI API key is not configured. Chat endpoint is running in demo mode.');
+  }
 });
 
 module.exports = server;

@@ -95,8 +95,44 @@ async function generatePlan(event) {
   }
 }
 
+async function generateChatResponse(event) {
+  event.preventDefault();
+
+  const prompt = document.getElementById('chatPrompt').value.trim();
+  const mode = document.getElementById('chatMode').value;
+  const chatResult = document.getElementById('chatResult');
+
+  if (!prompt) {
+    chatResult.innerHTML = `
+      <h3>AI response</h3>
+      <p class="empty-state">Please enter a prompt before sending it to the AI.</p>
+    `;
+    return;
+  }
+
+  try {
+    const response = await fetchJSON('/api/chat', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ prompt, mode })
+    });
+
+    chatResult.innerHTML = `
+      <h3>AI response</h3>
+      <div class="ai-response">${escapeHtml(response.result.response)}</div>
+    `;
+  } catch (error) {
+    chatResult.innerHTML = `
+      <h3>AI response</h3>
+      <p class="empty-state">Error: ${error.message}</p>
+    `;
+  }
+}
+
 function escapeHtml(value) {
-  return value
+  return String(value)
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
@@ -107,6 +143,7 @@ function escapeHtml(value) {
 document.getElementById('loadSummary').addEventListener('click', loadSummary);
 document.getElementById('loadFeatures').addEventListener('click', loadFeatures);
 document.getElementById('planForm').addEventListener('submit', generatePlan);
+document.getElementById('chatForm').addEventListener('submit', generateChatResponse);
 
 loadSummary();
 loadFeatures();

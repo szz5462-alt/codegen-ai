@@ -12,6 +12,7 @@
       <nav>
         <a href="#features">Features</a>
         <a href="#workspace">Workspace</a>
+        <a href="#chat">AI Chat</a>
         <a href="#status">Status</a>
       </nav>
     </header>
@@ -38,7 +39,7 @@
             <ul>
               <li>Prompt-based planning</li>
               <li>Debug workflows</li>
-              <li>API and UI generation</li>
+              <li>OpenAI-ready</li>
             </ul>
           </div>
         </div>
@@ -74,6 +75,34 @@
         <div id="resultPanel" class="result-panel">
           <h3>Generated output</h3>
           <p class="empty-state">Your AI-assisted plan will appear here.</p>
+        </div>
+      </section>
+
+      <section id="chat" class="section chat-section">
+        <div class="workspace-header">
+          <h2>Ask the AI assistant</h2>
+        </div>
+
+        <form id="chatForm" class="plan-form">
+          <label for="chatPrompt">Your prompt</label>
+          <textarea id="chatPrompt" rows="5" placeholder="Ask for an architecture review, bug fix strategy, or implementation guidance..."></textarea>
+
+          <div class="form-row">
+            <label for="chatMode">Mode</label>
+            <select id="chatMode">
+              <option value="general">General</option>
+              <option value="debug">Debug</option>
+              <option value="component">Component</option>
+              <option value="api">API</option>
+            </select>
+          </div>
+
+          <button type="submit" class="primary-button">Send to AI</button>
+        </form>
+
+        <div id="chatResult" class="result-panel">
+          <h3>AI response</h3>
+          <p class="empty-state">The AI output will be displayed here.</p>
         </div>
       </section>
 

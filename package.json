@@ -14,5 +14,8 @@
     "debugging",
     "analysis"
   ],
-  "license": "MIT"
+  "license": "MIT",
+  "dependencies": {
+    "openai": "^4.56.0"
+  }
 }
