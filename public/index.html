@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>codegen-ai</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">codegen-ai</div>
+      <nav>
+        <a href="#features">Features</a>
+        <a href="#workflow">Workflow</a>
+        <a href="#status">Status</a>
+      </nav>
+    </header>
+
+    <main>
+      <section class="hero">
+        <div class="hero-copy">
+          <p class="eyebrow">AI Engineering Workspace</p>
+          <h1>Build faster with AI-guided code generation and debugging.</h1>
+          <p class="subtitle">
+            codegen-ai helps teams generate code, explain logic, analyze failures,
+            and refactor systems more confidently.
+          </p>
+          <div class="actions">
+            <button id="loadSummary">Load Summary</button>
+            <button id="loadFeatures" class="secondary">View Features</button>
+          </div>
+        </div>
+
+        <div class="hero-panel">
+          <div class="panel-card">
+            <span class="label">System Status</span>
+            <strong id="statusText">Ready</strong>
+            <ul>
+              <li>Code generation</li>
+              <li>Bug analysis</li>
+              <li>Refactoring</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <section id="features" class="section">
+        <h2>Core features</h2>
+        <div id="featureList" class="features-grid"></div>
+      </section>
+
+      <section id="workflow" class="section">
+        <h2>How it works</h2>
+        <div class="steps">
+          <div class="step">
+            <span>01</span>
+            <h3>Prompt</h3>
+            <p>Describe the task, bug, or architecture goal in plain language.</p>
+          </div>
+          <div class="step">
+            <span>02</span>
+            <h3>Analyze</h3>
+            <p>Review code context, failure signals, and relevant patterns.</p>
+          </div>
+          <div class="step">
+            <span>03</span>
+            <h3>Generate</h3>
+            <p>Produce clean implementation, tests, refactors, or debug guidance.</p>
+          </div>
+        </div>
+      </section>
+
+      <section id="status" class="section status-box">
+        <h2>Live platform status</h2>
+        <pre id="apiStatus">Loading platform status...</pre>
+      </section>
+    </main>
+
+    <script src="/app.js"></script>
+  </body>
+</html>
