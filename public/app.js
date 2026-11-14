@@ -1,7 +1,8 @@
-async function fetchJSON(url) {
-  const response = await fetch(url);
+async function fetchJSON(url, options = {}) {
+  const response = await fetch(url, options);
   if (!response.ok) {
-    throw new Error(`Request failed with status ${response.status}`);
+    const errorData = await response.json().catch(() => ({ error: 'Request failed' }));
+    throw new Error(errorData.error || `Request failed with status ${response.status}`);
   }
   return response.json();
 }
@@ -36,8 +37,76 @@ async function loadFeatures() {
   }
 }
 
+async function generatePlan(event) {
+  event.preventDefault();
+
+  const prompt = document.getElementById('promptInput').value.trim();
+  const mode = document.getElementById('modeSelect').value;
+  const resultPanel = document.getElementById('resultPanel');
+
+  if (!prompt) {
+    resultPanel.innerHTML = `
+      <h3>Generated output</h3>
+      <p class="empty-state">Please enter a task description before generating a plan.</p>
+    `;
+    return;
+  }
+
+  try {
+    const response = await fetchJSON('/api/generate', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ prompt, mode })
+    });
+
+    const { result } = response;
+
+    resultPanel.innerHTML = `
+      <h3>Generated output</h3>
+      <div class="summary-box">
+        <strong>Summary:</strong> ${result.summary}
+      </div>
+
+      <div class="suggestions">
+        <strong>Suggested next steps:</strong>
+        <ul>
+          ${result.suggestions.map(item => `<li>${item}</li>`).join('')}
+        </ul>
+      </div>
+
+      <div class="checklist">
+        <strong>Checklist:</strong>
+        <ul>
+          ${result.checklist.map(item => `<li>${item}</li>`).join('')}
+        </ul>
+      </div>
+
+      <div class="code-block">
+        <pre>${escapeHtml(result.snippet)}</pre>
+      </div>
+    `;
+  } catch (error) {
+    resultPanel.innerHTML = `
+      <h3>Generated output</h3>
+      <p class="empty-state">Error: ${error.message}</p>
+    `;
+  }
+}
+
+function escapeHtml(value) {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 document.getElementById('loadSummary').addEventListener('click', loadSummary);
 document.getElementById('loadFeatures').addEventListener('click', loadFeatures);
+document.getElementById('planForm').addEventListener('submit', generatePlan);
 
 loadSummary();
 loadFeatures();

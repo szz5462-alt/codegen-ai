@@ -104,7 +104,7 @@ button:hover {
   transform: translateY(-1px);
 }
 
-button:not(.secondary) {
+button:not(.secondary), .primary-button {
   background: linear-gradient(135deg, var(--primary), var(--primary-strong));
   color: #041b2d;
 }
@@ -120,10 +120,13 @@ button.secondary {
   justify-content: center;
 }
 
-.panel-card {
-  background: rgba(18, 38, 60, 0.9);
+.panel-card, .feature-card, .step, .status-box, .result-panel, .plan-form {
+  background: rgba(13, 27, 42, 0.9);
   border: 1px solid var(--border);
-  border-radius: 18px;
+  border-radius: 16px;
+}
+
+.panel-card {
   padding: 1.5rem;
   width: min(100%, 360px);
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.25);
@@ -165,9 +168,6 @@ button.secondary {
 }
 
 .feature-card {
-  background: rgba(13, 27, 42, 0.9);
-  border: 1px solid var(--border);
-  border-radius: 16px;
   padding: 1.5rem;
 }
 
@@ -180,35 +180,87 @@ button.secondary {
   line-height: 1.7;
 }
 
-.steps {
+.workspace-section {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 1.25rem;
+  gap: 1.5rem;
 }
 
-.step {
-  background: rgba(13, 27, 42, 0.9);
-  border: 1px solid var(--border);
-  border-radius: 16px;
+.plan-form {
   padding: 1.5rem;
 }
 
-.step span {
-  display: inline-block;
-  color: var(--primary-strong);
-  font-weight: 700;
+.plan-form label {
+  display: block;
   margin-bottom: 0.6rem;
+  font-weight: 600;
 }
 
-.step p {
+textarea, select {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.02);
+  color: var(--text);
+  padding: 0.9rem 1rem;
+  font: inherit;
+}
+
+textarea {
+  min-height: 150px;
+  resize: vertical;
+}
+
+.form-row {
+  margin-top: 1rem;
+}
+
+.primary-button {
+  margin-top: 1rem;
+  width: 100%;
+}
+
+.result-panel {
+  padding: 1.5rem;
+}
+
+.result-panel h3 {
+  margin-top: 0;
+}
+
+.empty-state {
   color: var(--muted);
+}
+
+.summary-box,
+.suggestions,
+.checklist,
+.code-block {
+  margin-top: 1rem;
+}
+
+.summary-box {
+  font-size: 1.02rem;
   line-height: 1.7;
 }
 
-.status-box {
-  background: rgba(13, 27, 42, 0.9);
+.suggestions ul,
+.checklist ul {
+  margin: 0.6rem 0 0;
+  padding-left: 1.2rem;
+  color: var(--muted);
+  line-height: 1.8;
+}
+
+.code-block {
+  background: rgba(6, 16, 27, 0.86);
   border: 1px solid var(--border);
-  border-radius: 18px;
+  border-radius: 12px;
+  padding: 1rem;
+  overflow-x: auto;
+  color: var(--primary);
+}
+
+.status-box {
   padding: 1.5rem;
 }
 
