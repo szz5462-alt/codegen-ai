@@ -28,7 +28,22 @@ npm start
 
 Open <http://localhost:3000>. SQLite data is stored in `data/codegen-ai.sqlite` by default. Set `DATA_DIR` to use another persistent directory. Keep `.env` and the database out of version control.
 
-For production, set `NODE_ENV=production` (which enables Secure cookies behind HTTPS), use a persistent disk for `DATA_DIR`, and configure a real OpenAI API key through the hosting provider's secret manager. Back up the database and use HTTPS.
+## Deploy on Render
+
+This project is set up for Render deployment. It is not meant for GitHub Pages because it runs a Node.js server and uses SQLite persistence.
+
+1. Push this repository to GitHub.
+2. Sign in to Render and choose "New +" -> "Web Service".
+3. Connect the repository.
+4. Use the default settings from `render.yaml`.
+5. Add your `OPENAI_API_KEY` in the Render dashboard under Environment Variables.
+6. Deploy.
+
+Render will start the app with the configured environment variables and persistent storage in the mounted disk.
+
+## Production notes
+
+For production, set `NODE_ENV=production` (which enables Secure cookies behind HTTPS), use a persistent disk for `DATA_DIR`, and configure a real OpenAI API key through your hosting provider's secret manager. Back up the database and use HTTPS.
 
 ## API
 

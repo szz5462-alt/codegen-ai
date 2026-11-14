@@ -1,0 +1,24 @@
+services:
+  - type: web
+    name: codegen-ai
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000
+      - key: SESSION_COOKIE_SECURE
+        value: true
+      - key: DATA_DIR
+        value: /var/data
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: OPENAI_MODEL
+        value: gpt-4o-mini
+    disk:
+      name: data
+      mountPath: /var/data
+      sizeGB: 1
